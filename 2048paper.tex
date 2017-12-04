@@ -1,0 +1,370 @@
+\documentclass[conference]{IEEEtran}
+
+\usepackage{cite}
+\usepackage{lscape}
+\usepackage{dsfont}
+\usepackage{amsmath}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\usepackage{graphicx}
+
+\makeatletter
+\def\BState{\State\hskip-\ALG@thistlm}
+\makeatother
+
+% correct bad hyphenation here
+\hyphenation{op-tical net-works semi-conduc-tor}
+
+
+\begin{document}
+
+\title{2048 as a MDP}
+
+% author names and affiliations
+% use a multiple column layout for up to three different
+% affiliations
+\author{\IEEEauthorblockN{Hunter Mills}
+\IEEEauthorblockA{Institute for Computational and Mathematical Engineering\\
+Stanford University\\
+Email: hmills2@stanford.edu}
+}
+
+% make the title area
+\maketitle
+
+% As a general rule, do not put math, special symbols or citations
+% in the abstract
+\begin{abstract}
+2048 is a simple computer game where the player takes an action, tiles move in a predicable manner and new tiles appear randomly with know probabilities, and the current state is completely observed. Thusly, 2048 can be modeled as a Markov Decision Process (MDP). Several online search methods will be considered including forward search, sparse sampling search, and Monte Carlo tree search. These methods will be compared to a greedy policy and a random action policy.
+\end{abstract}
+\section{Introduction}
+
+The game 2048 is played on a 4x4 grid designed by Gabriele Cirulli \cite{2048}. Each grid point is either empty or contains a tile with a numerical value. All values are powers of two [Fig. 1]. additionally, there is a score counter. The player can choose from one of four actions: left, right, up, or down. When an action is chosen all tiles slide across the board in the selected direction until they hit the edge of the board or another tile. If two tiles of the same value collide, they merge and their values are added. The value of the merged tile is then added to the score. After each action and the tiles have moved, a random empty point is filled with a tile valued at 2 (90\%) or 4 (10\%). An action is forbidden if it causes no tiles to move or merge, and the game ends when no more moves can be made. The goal of the game is to obtain a tile valued at least 2048. It is also possible to go above and beyind the mark of 2048 and score 4096, 8192, 16384, and so on. Here success is measured by obtaining a tile valued at least 2048.
+
+\begin{figure}[htbp]
+\centering{\includegraphics[scale= .75]{2048.png}}
+\caption{2048 game \cite{2048}.}
+\label{fig}
+\end{figure}
+
+This game is difficult for several reason. It involves planning several moves ahead, and taking calculated risks to decide when to place the game in a precarious position to merge large tiles.
+
+Since actions and transitions into successive states are well defined, and only depend of the previous state, 2048 can be modeled as a Markov Decision Process. Because of the number of possible game states and the possible transitions, online approximations will be considered.
+Online approximations compute a small number of steps into future instead of considering all paths. These approximations will include forward search, sparse sampling search, and Monte Carlo tree search.
+
+\section{Background}
+
+The goal of a MDP is to determine an optimal policy $\pi^*$ that at state $s$ returns an action $a$ that transitions into state $s'$ that maximizes
+$$\sum_{t=0}^\infty \gamma^t R(s_t,a_t)$$
+for reward $R(s,a)$ and learning parameter $\gamma = [0,1].$
+It can also be shown that an optimal policy $\pi^*$ satisfies the Bellman equation \cite{d}
+\begin{equation}
+	U^*(s) = \max_a \left( R(s,a)  + \gamma\sum_{s'}T(s'|s,a)U^*(s')\right).
+\end{equation}
+Online methods approximate the Bellman equation as \cite{d}
+\begin{equation}
+	U_d(s) = \max_a \left( R(s,a)  + \gamma\sum_{s'}T(s'|s,a)U_{d-1}(s')\right),
+\end{equation}
+
+with 
+$$U_0(s) = R(s,a).$$
+Here $d$ is the depth of future states considered. This approximation will converge to the Bellman equation as $d \rightarrow \infty$\cite{d}.
+
+This approximation is considered because the explicit solution is computationally infeasible. Given the set of possible actions $A$ and the set of possible outcomes $S$, the number of states to be considered at depth $d$ is 
+$$O((|S| \cdot |A|)^d).$$
+For 2048 $|A|=4$ for up, down, left and right. $|S|$ is twice the number of open tiles because after every move, a 2 or 4 is inserted into any open tile.
+
+\subsection{Online search methods}
+Forward search explicitly calculates equation (2). The forward search algorithm is outlined in Algorithm 1 \cite{d}, where $d$ and $\gamma$ are hyperparameters that are supplied. As discussed earlier, the runtime for this type of algorithm is $O((|S|\cdot |A|)^d).$
+\begin{algorithm}
+	\caption{Forward search}
+	\begin{algorithmic}[1]
+		\Function{SelectActions}{$s,d$}
+		\If {$d = 0$ } \Return (NIL, 0)
+		\EndIf
+		\State $(a^*, v^*) \leftarrow$(NIL,-$\infty$)
+		\For {$a \in A(s)$}
+		\State $v \leftarrow R(s,a)$
+		\For {$s' \in S(s,a)$}
+		\State $(a',v') \leftarrow $ \textsc{SelectActions}$(s',d-1)$
+		\State $v \leftarrow v + \gamma T(s'|s,a)v'$
+		\EndFor
+		\If {$v > v^*$} $(a^*, v^*) \leftarrow (a,v)$
+		\EndIf
+		\EndFor
+		\State\Return $(a^*,v^*)$
+		\EndFunction
+	\end{algorithmic}
+\end{algorithm}
+
+Sparse sampling further approximates equation (2). Instead of explicitly computing all children states $s'$ from parent state $s$, it samples $n$ possible children based on their likelihood for each possible action $a$. This reduces the computational complexity to $O((n \cdot |A|)^d).$ This reduction in computation allows the search depth $d$ to be increased. Sparse sampling is outlined in Algorithm 2 \cite{d}. Here $d$, $\gamma$ and $n$ are hyperparameters that are supplied.
+\begin{algorithm}
+	\caption{Sparse sampling}
+	\begin{algorithmic}[1]
+		\Function{SelectActions}{$s,d,n$}
+		\If {$d = 0$ } \Return (NIL, 0)
+		\EndIf
+		\State $(a^*, v^*) \leftarrow$(NIL,$-\infty$)
+		\For {$a \in A(s)$}
+		\State $v \leftarrow 0$
+		\For {$i \leftarrow 1:n$}
+		\State $(s',r) \sim G(s,a)$
+		\State $(a',v') \leftarrow $ \textsc{SelectActions}$(s',d-1,n)$
+		\State $v \leftarrow v + (r + \gamma v')/n$
+		\EndFor
+		\If {$v > v^*$} $(a^*, v^*) \leftarrow (a,v)$
+		\EndIf
+		\EndFor
+		\State\Return $(a^*,v^*)$
+		\EndFunction
+	\end{algorithmic}
+\end{algorithm}
+
+Monte Carlo tree search can be thought of as a variation of sparse sampling. Instead of randomly sampling $n$ children, Monte Carlo tree search weights samples based on how interesting they are. This allows for an unbalanced tree that ceases to explore areas that appear to perform poorly. Also, when new points are encountered, new actions are sampled directly using their direct reward $R$ as weights. Monte Carlo tree sampling is outlined in Algorithm 3 \cite{d} Here $d$, $\gamma$ and $\Delta t$ are hyperparameters that are supplied. Because of the structure of Monte Carlo tree search, runtime $\Delta t$ can be capped which allows for graceful exit.
+\begin{algorithm}
+	\caption{Monte Carlo tree search}
+	\begin{algorithmic}[1]
+		\Function{SelectActions}{$s,d,\Delta t$}
+		\State $t_0 \leftarrow \textsc{Time()}$
+		\While {\textsc{Time()}$-\; t_0 <\Delta t$}
+		\State \textsc{Simulate}$(s,d,\pi_0)$
+		\EndWhile
+		\State\Return $\arg \max_a Q(s,a)$
+		\EndFunction
+		
+		\Function {Simulate}{$s,d,\pi_0$}
+		\If {$d=0$} \Return 0
+		\EndIf
+		\If {$s \notin T$}
+		\For {$a \in A(s)$}
+		\State $(N(s,a),Q(s,a))\leftarrow (1, R(s,a))$
+		\EndFor
+		\State $T \leftarrow T \cup \{s\}$
+		\State \Return \textsc{Rollout}$(s,d,\pi_0)$
+		\EndIf
+		\State $a\leftarrow \arg\max_a Q(s,a) + c\sqrt{\frac{\log \sum_a N(s,a)}{N(s,a)}}$
+		\State $(s',r)\sim G(s,a)$
+		\State $q \leftarrow r + \gamma\textsc{Simulate}(s',d-1, \pi_0)$
+		\State $N(s,a) \leftarrow N(s,a) + 1$
+		\State $Q(s,a) \leftarrow Q(s,a) + (q - Q(s,a)) / N(s,a)$
+		\State \Return q
+		\EndFunction
+		
+		\Function {Rollout}{$s,d,\pi_0$}
+		\If {d = 0} \Return 0
+		\EndIf
+		\State $a\sim \pi_0(s)$
+		\State $(s',r) \sim G(s,a)$
+		\State \Return $r + \gamma\textsc{Rollout}(s',d-1,\pi_0)$
+		\EndFunction
+		
+		\Function{$\pi_0$}{s}
+		\State $a =$ \textsc{sample}$\left( a_{1:i}, R(s,a_{1:i})/\sum_i R(s,a_i) \right)$
+		\State\Return a
+		\EndFunction
+	\end{algorithmic}
+\end{algorithm}
+
+\subsection{Reward functions}
+
+In order to take actions given the formulation thus far, individual game states must be scored with a reward function $R$. These scores are based on heuristics designed with expert knowledge of the game \cite{ai}. Multiple heuristics can be used and combined to determine the quality of a given state. The following heuristics are considered for 2048:
+\begin{itemize}
+	\item Maximum tile value
+	\item Number of open points
+	\item Sum square of tile value
+	\item Monotonicity
+\end{itemize}
+Many of these heuristics are common for solving 2048\cite{stack}.
+
+It is also important to consider the scaling and combination of these heuristics such that they do not dominate the value of a state unjustly \cite{ai, d}. To satisfy scaling, the base two logarithm of tile values are considered. This reduces the range of values for tiles from 2-2048
+to 1-11. Also, any values that are squared will eventually have the square root taken. 
+
+The max value heuristic promotes the merger of the largest tile. Formally for a state $s$ with tile value $s_{i,j}$ at position $i,j$, the max tile value heuristic is formulated as
+$$ f_{1}(s) = \log_2\left(\max_{i,j}\left(s_{i,j}\right)\right). $$ 
+
+The open tile heuristic promotes tiles being empty. This is helpful because it allows more moves to be valid, which allows the game to continue. It is formed as
+$$ f_{2}(s) = \sum_{i,j}\mathds{1}_{s_{i,j} = 0}. $$
+
+The sum square heuristic, like the max tile heuristic, promotes the merger of tiles, but not only the largest tile. Only non-zero tiles are considered.
+$$ f_{3}(s) = \sqrt{\sum_{\substack{i,j \\ s_{i,j} > 0}} \left(\log_2\left( s_{i,j}\right)\right)^2}. $$
+
+The formulation of the monotonicity heuristic is more involved. Across each row and column, forward and back, an accumulating maximum is created. This max is squared and differenced by the square current $i,j$ value. These differences are then summed. Here $s_{i,j:k}$ is the set $\{ s_{i,j}, s_{i,j+1}, \dots , s_{i,k} \}$, and $s_{i:k,j}$ is the set $\{ s_{i,j}, s_{i+1,j}, \dots , s_{k,j} \}$:
+$$ f_{N}(s) = \sum_{i,j}\left(\left(\log_2\max_{j}\left(s_{i,1:j}\right)\right)^2 - \left(\log_2s_{i,j}\right)^2\right) $$
+
+$$ f_{S}(s) = \sum_{i,j}\left(\left(\log_2\max_{j}\left(s_{i,j:4}\right)\right)^2 - \left(\log_2s_{i,j}\right)^2\right) $$
+
+$$ f_{W}(s) = \sum_{i,j}\left(\left(\log_2\max_{i}\left(s_{1:i,j}\right)\right)^2 - \left(\log_2s_{i,j}\right)^2\right) $$
+
+$$ f_{E}(s) = \sum_{i,j}\left(\left(\log_2\max_{i}\left(s_{i:4,j}\right)\right)^2 - \left(\log_2s_{i,j}\right)^2\right). $$
+This creates a monotonicity measure for up, down, left and right. If a row or column is perfectly monotonic, this is valued as zero, and positive otherwise. These can then be combined to measure monotonicity in two directions as follows
+$$f_{NW}(s) = f_{N}(s) + f_{W}$$
+
+$$f_{NE}(s) = f_{N}(s) + f_{E}$$
+
+$$f_{SW}(s) = f_{S}(s) + f_{W}$$
+
+$$f_{SE}(s) = f_{S}(s) + f_{E}.$$
+The best monotonicity score is then extracted (least positive), and the square root is taken for magnitude reasons discussed previously. This value is then reversed to promote monotonicity
+$$ f_{4}(s) = -\sqrt{\min\left\{ f_{NW}(s),f_{NE}(s),f_{SW}(s),f_{SE}(s) \right\}}.$$
+
+All of these functions are taken as a weighted combination, and the reward $R$ of a state $s$ is evaluated as
+$$ R(s) = w_1f_{1}(s) + w_2f_{2}(s) + w_3f_{3}(s) + w_4f_{4}(s). $$
+Here $w_1, w_2, w_3, w_4$ are hyperparameters.
+
+\section{Implementation}
+The 2048 MDP solver was written in Julia \cite{julia}. The game mechanics (not solver) for efficient computation where inspired by Robert Xiao \cite{nneo}. The grid was stored as a 64-bit unsigned integer were each 4-bit nibble represented a grid point. Two raised to the power of the nibble represents the grid point value. This allows the max tile value of $2^{16} = 32768$. Many move and score computations were precomputed across rows and columns allowing for fast lookup and simple recombination. This allowed for roughly $10^6$ states to be analyzed per second.
+
+Hyperparameters with similar runtimes in the worst case were considered. This included a forward search with $d=2$ (FS2) and $d=3$ (FS3). Included is sparse sampling with $d=4, n=4$ (SS4-4), $d=5, n=2$ (SS5-2) and $d=6, n=1$ (SS6-1), $d=7, n=1$ (SS7-1) and $d=8, n=1$ (SS8-1). And, also included is a Monte Carlo tree search with $d=4, \Delta t = 0.2$ (MCTS4), $d=5, \Delta t = 0.2$ (MCTS5) and $d=6, \Delta t = 0.2$ (MCTS6). Runtimes for each of these settings are listed in Table 1.
+\begin{table}[htbp]
+	\caption{Action selection runtime table in seconds}
+	\begin{center}
+		\begin{tabular}{|c||c|c|c|c|}
+			\hline
+			Policy & Parameters & Average & Deviation & Max \\
+			\hline\hline
+			FS2 & $d=2$ &0.00106 & 0.00089 & 0.00677 \\
+			\hline
+			FS3    &   $d=3$            & 0.017    & 0.028 & 0.351   \\
+			\hline
+			SS4-4  & $d=4,n=4$          & 0.242    & 0.068 & 0.442              \\
+			\hline
+			SS5-2  & $d=5,n=2$          & 0.107    & 0.035 & 0.217              \\
+			\hline
+			SS6-1  & $d=6,n=1$          & 0.0171   & 0.0056 & 0.0384              \\
+			\hline
+			SS7-1  & $d=7,n=1$          & 0.0583   & 0.0235 & 0.175             \\
+			\hline
+			SS8-1  & $d=8,n=1$          & 0.174    & 0.0723 & 0.499              \\
+			\hline
+			MCTS4  & $d=4,\Delta t=0.2$ & 0.201    & 0.001 & 0.204             \\
+			\hline
+			MCTS5  & $d=5,\Delta t=0.2$ & 0.201    & 0.002 & 0.207             \\
+			\hline
+			MCTS6  & $d=6,\Delta t=0.2$ & 0.201    & 0.005 & 0.213             \\
+			\hline
+		\end{tabular}
+		\label{tab1}
+	\end{center}
+\end{table}
+
+For better comparison, all other hyperparameters were held constant. Heuristics weights were set as $w = [3.25,4,1,1.75]$, the learning parameter $\gamma = 0.75$, and for Monte Carlo tree search, $c = 10.$
+
+One hundred trials were collected for each search algorithm.
+
+\begin{table}[htbp]
+	\caption{ Success rates for each search policy }
+	\begin{center}
+		\begin{tabular}{|c||c|c|c|c|}
+			\hline
+			Policy & \%Success & \%2048 & \%4096 & \%8196 \\
+			\hline\hline
+			Random & 0 & 0 & 0 & 0 \\
+			\hline
+			Greedy & 0 & 0 & 0 & 0 \\
+			\hline
+			FS2    & 11 & 11 & 0 & 0 \\
+			\hline
+			FS3    & 54 & 50 & 4 & 0 \\
+			\hline
+			SS4-4  & 67 & 58 & 9 & 0 \\
+			\hline
+			SS5-2  & 81 & 70 & 11 & 0 \\
+			\hline
+			SS6-1  & 72 & 59 & 13 & 0 \\
+			\hline
+			SS7-1  & 78 & 61 & 17 & 0 \\
+			\hline
+			SS8-1  & 79 & 64 & 15 & 0 \\
+			\hline
+			MCTS4  & 75 & 59 & 16 & 0 \\
+			\hline
+			MCTS5  & 92 & 47 & 43 & 2 \\
+			\hline
+			MCTS6  & 82 & 59 & 25 & 0 \\
+			\hline
+		\end{tabular}
+		\label{tab1}
+	\end{center}
+\end{table}
+
+\begin{table}[htbp]
+	\caption{ Scores for each search policy }
+	\begin{center}
+		\begin{tabular}{|c||c|c|c|}
+			\hline
+			Policy & Average & Deviation & Max \\
+			\hline\hline
+			Random & 1183 & 599 & 2864 \\
+			\hline
+			Greedy & 4340 & 1613 & 8412 \\
+			\hline
+			FS2    & 14722  & 6726 & 32840 \\
+			\hline
+			FS3    & 25452 & 11168 & 71836 \\
+			\hline
+			SS4-4  & 31114 & 14630 & 78204 \\
+			\hline
+			SS5-2  & 34603 & 13376 & 78136 \\
+			\hline
+			SS6-1  & 31752 & 13894 & 72780 \\
+			\hline
+			SS7-1  & 33854 & 13792 & 70680  \\
+			\hline
+			SS8-1  & 34415 & 15181 & 80200 \\
+			\hline
+			MCTS4  & 35585 & 16182 & 82744 \\
+			\hline
+			MCTS5  & 49627 & 22540 & 155964 \\
+			\hline
+			MCTS6  & 40388 & 16810 & 82760 \\
+			\hline
+		\end{tabular}
+		\label{tab1}
+	\end{center}
+\end{table}
+
+\section{Results}
+
+All methods accounting for uncertainty performed better than the greedy policy and the random policy, and forward search of depth 3 performed better than depth 2 (Figure 2, 3, 4, 5 Table 2, 3).
+
+All sparse sampling methods considered performed better than forward search of depth 3 despite only considering shockingly low values of $n$. Sparse sampling with $d=5$ and $n=2$ performed best (Figure 2, 3, 4, 5 Table 2, 3) despite having a lower runtime than both $d=4,n=4$ and $d=8,n=1$ (Table 1).
+
+Monte Carlo tree search of depth 5 performed better than both 4 and 6. It also performed best overall. It had a $92\%$ success rate, the highest game scores, the highest rate of achieving a max tile of 4096 $(43\%)$ and the only policy to achieve a 8196 tile $(2\%)$ (Figure 2, 3, 4, 5 Table 2, 3).
+
+Overall, online MDP approximations considered were successful in playing and beating 2048.
+
+\begin{figure}[htbp]
+	\centering{\includegraphics[scale= .4]{success.png}}
+	\caption{}
+	\label{fig}
+\end{figure}
+
+\begin{figure}[htbp]
+	\centering{\includegraphics[scale= .5]{boxplots.png}}
+	\caption{}
+	\label{fig}
+\end{figure}
+
+\section{Further Work}
+Code optimization and parallelization could be performed to better improve time performance to allow deeper tree searches.
+
+Parameter optimization could also be performed to better tune the heuristic weights $w$ and learning parameters $\gamma$. This could include cross entropy methods, or evolutionary models \cite{d}.
+
+Iterative deepening could be implemented to allow constant time computation in forward search or sparse sampling, by rerunning the computation one level $d$ deeper or number of points sampled $n$ each iteration until time expires \cite{ai}. Hybrid methods could also be considered that switch between forward search sparse sampling based on the current rate at which possible states expand. It would also be possible to implement multiple search methods with a voting scheme to choose actions.
+
+\bibliographystyle{IEEEtran}
+\bibliography{2048paper}
+
+\newpage
+\begin{figure*}[]
+	\centering{\includegraphics[scale= .8]{barplots.png}}
+	\caption{}
+	\label{fig}
+	\centering{\includegraphics[scale= .8]{densities.png}}
+	\caption{}
+	\label{fig}
+\end{figure*}
+
+\end{document}
+
+
